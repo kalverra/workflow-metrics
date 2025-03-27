@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -18,7 +19,7 @@ type Observations struct {
 
 func Monitor(interval time.Duration) error {
 	interruptChan := make(chan os.Signal, 1)
-	signal.Notify(interruptChan, os.Interrupt, os.Kill)
+	signal.Notify(interruptChan, os.Interrupt, syscall.SIGTERM)
 
 	cpus, err := cpu.Info()
 	if err != nil {

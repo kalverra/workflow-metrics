@@ -24,4 +24,5 @@ repos:
       name: golangci-lint
       entry: golangci-lint run
       language: system
-      stages: [pre-push]
+      types: [go]
+      stages: [pre-commit]
