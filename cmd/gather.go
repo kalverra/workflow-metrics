@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -36,6 +37,7 @@ var gatherCmd = &cobra.Command{
 		if githubToken != "" {
 			log.Debug().Msg("Using GitHub token from flag")
 		} else if os.Getenv(githubTokenEnvVar) != "" {
+			githubToken = os.Getenv(githubTokenEnvVar)
 			log.Debug().Msg("Using GitHub token from environment variable")
 		} else {
 			log.Warn().Msg("GitHub token not provided, will likely hit rate limits quickly")
@@ -51,6 +53,19 @@ var gatherCmd = &cobra.Command{
 		client := github.NewClient(rateLimiter)
 		if githubToken != "" {
 			client = client.WithAuthToken(githubToken)
+		}
+		limits, _, err := client.RateLimit.Get(context.Background())
+		if err != nil {
+			return err
+		}
+		rateLimit := limits.GetCore().Limit
+		rateRemaining := limits.GetCore().Remaining
+		log.Debug().Int("limit", rateLimit).Int("remaining", rateRemaining).Msg("GitHub rate limits")
+		if rateLimit <= 60 {
+			log.Warn().
+				Int("limit", rateLimit).
+				Int("remaining", rateRemaining).
+				Msg("GitHub rate limit is low. You're either not providing a token, or your token isn't valid.")
 		}
 
 		if workflowRunID != 0 {
@@ -74,8 +89,14 @@ func init() {
 	gatherCmd.Flags().StringVarP(&githubToken, "github-token", "t", "", fmt.Sprintf("GitHub API token (can also be set via %s)", githubTokenEnvVar))
 	gatherCmd.Flags().BoolVarP(&forceUpdate, "force-update", "u", false, "Force update of existing data")
 
-	gatherCmd.MarkFlagRequired("owner")
-	gatherCmd.MarkFlagRequired("repo")
+	err := gatherCmd.MarkFlagRequired("owner")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to mark flag as required")
+	}
+	err = gatherCmd.MarkFlagRequired("repo")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to mark flag as required")
+	}
 
 	rootCmd.AddCommand(gatherCmd)
 }

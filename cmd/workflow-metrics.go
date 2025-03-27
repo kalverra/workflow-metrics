@@ -65,16 +65,19 @@ var rootCmd = &cobra.Command{
 			Str("commit", commit).
 			Str("build_time", buildTime).
 			Str("built_by", builtBy).
-			Msg("Version Info")
+			Msg("Workflow Metrics Version Info")
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		err := cmd.Help()
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to print help message")
+		}
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&logFileName, "log-file", "f", "workflow-metrics.log", "Log file name")
+	rootCmd.PersistentFlags().StringVarP(&logFileName, "log-file", "f", "workflow-metrics.log.json", "Log file name")
 	rootCmd.PersistentFlags().StringVarP(&logLevelInput, "log-level", "l", "info", "Log level")
 	rootCmd.PersistentFlags().BoolVarP(&disableConsoleLog, "silent", "s", false, "Disables console logs. Still logs to file")
 }
