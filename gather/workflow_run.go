@@ -194,7 +194,7 @@ func jobsData(client *github.Client, owner, repo string, workflowRunID int64) ([
 		listOpts.Page = resp.NextPage
 	}
 	sort.Slice(workflowJobs, func(i, j int) bool {
-		return workflowJobs[i].GetStartedAt().Time.Before(workflowJobs[j].GetStartedAt().Time)
+		return workflowJobs[i].GetStartedAt().Before(workflowJobs[j].GetStartedAt().Time)
 	})
 	log.Trace().
 		Int("job_count", len(workflowJobs)).
