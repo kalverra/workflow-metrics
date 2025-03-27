@@ -34,3 +34,4 @@ workflow-metrics.log
 workflow-metrics.log.json
 workflow-metrics.json
 data/
+observe_output/

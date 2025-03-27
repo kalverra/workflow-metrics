@@ -3,10 +3,10 @@ package gather
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/go-github/v70/github"
@@ -15,40 +15,30 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const (
-	timeoutDur = 10 * time.Second
+const workflowRunsDir = "workflow_runs"
 
-	dataDir         = "data"
-	workflowRunsDir = "workflow_runs"
-)
+// Mapping of how much a minute for each runner type costs
+// cost depicted in tenths of a cent
+// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates
+var rateByRunner = map[string]int64{
+	// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates-for-x64-powered-larger-runners
+	"UBUNTU":         8,   // $0.008
+	"UBUNTU_2_CORE":  8,   // $0.008
+	"UBUNTU_4_CORE":  16,  // $0.016
+	"UBUNTU_8_CORE":  32,  // $0.032
+	"UBUNTU_16_CORE": 64,  // $0.064
+	"UBUNTU_32_CORE": 128, // $0.128
+	"UBUNTU_64_CORE": 256, // $0.256
 
-var (
-	ghCtx            = context.WithValue(context.Background(), github.SleepUntilPrimaryRateLimitResetWhenRateLimited, true)
-	errGitHubTimeout = errors.New("github API timeout")
-
-	// Mapping of how much a minute for each runner type costs
-	// cost depicted in tenths of a cent
-	// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates
-	rateByRunner = map[string]int64{
-		// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates-for-x64-powered-larger-runners
-		"UBUNTU":         8,   // $0.008
-		"UBUNTU_2_CORE":  8,   // $0.008
-		"UBUNTU_4_CORE":  16,  // $0.016
-		"UBUNTU_8_CORE":  32,  // $0.032
-		"UBUNTU_16_CORE": 64,  // $0.064
-		"UBUNTU_32_CORE": 128, // $0.128
-		"UBUNTU_64_CORE": 256, // $0.256
-
-		// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates-for-arm64-powered-larger-runners
-		"UBUNTU_ARM":         5,   // $0.005
-		"UBUNTU_2_CORE_ARM":  5,   // $0.005
-		"UBUNTU_4_CORE_ARM":  10,  // $0.01
-		"UBUNTU_8_CORE_ARM":  20,  // $0.02
-		"UBUNTU_16_CORE_ARM": 40,  // $0.04
-		"UBUNTU_32_CORE_ARM": 80,  // $0.08
-		"UBUNTU_64_CORE_ARM": 160, // $0.16
-	}
-)
+	// https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions#per-minute-rates-for-arm64-powered-larger-runners
+	"UBUNTU_ARM":         5,   // $0.005
+	"UBUNTU_2_CORE_ARM":  5,   // $0.005
+	"UBUNTU_4_CORE_ARM":  10,  // $0.01
+	"UBUNTU_8_CORE_ARM":  20,  // $0.02
+	"UBUNTU_16_CORE_ARM": 40,  // $0.04
+	"UBUNTU_32_CORE_ARM": 80,  // $0.08
+	"UBUNTU_64_CORE_ARM": 160, // $0.16
+}
 
 // JobsData wraps standard GitHub WorkflowJob data with additional cost fields
 type JobsData struct {
@@ -88,12 +78,9 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 
 	startTime := time.Now()
 	log.Info().Int64("workflow_run_id", workflowRunID).Msg("Gathering workflow run data")
-	defer func() {
-		log.Info().
-			Str("duration", time.Since(startTime).String()).
-			Int64("workflow_run_id", workflowRunID).
-			Msg("Gathered workflow run data")
-	}()
+	successLog := log.Info().
+		Str("duration", time.Since(startTime).String()).
+		Int64("workflow_run_id", workflowRunID)
 
 	if !forceUpdate && fileExists {
 		log.Debug().Str("file", targetFile).Int64("workflow_run_id", workflowRunID).Msg("Reading workflow run data from file")
@@ -102,6 +89,7 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 			return nil, fmt.Errorf("failed to open workflow run file: %w", err)
 		}
 		err = json.Unmarshal(workflowFileBytes, &workflowRunData)
+		successLog.Msg("Gathered workflow run data")
 		return workflowRunData, err
 	}
 
@@ -167,9 +155,11 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 		return nil, fmt.Errorf("failed to write workflow run data to file for workflow run '%d': %w", workflowRunID, err)
 	}
 
+	successLog.Msg("Gathered workflow run data")
 	return workflowRunData, nil
 }
 
+// jobsData fetches all jobs for a workflow run from GitHub
 func jobsData(client *github.Client, owner, repo string, workflowRunID int64) ([]*github.WorkflowJob, error) {
 	var (
 		workflowJobs = []*github.WorkflowJob{}
@@ -203,6 +193,9 @@ func jobsData(client *github.Client, owner, repo string, workflowRunID int64) ([
 		}
 		listOpts.Page = resp.NextPage
 	}
+	sort.Slice(workflowJobs, func(i, j int) bool {
+		return workflowJobs[i].GetStartedAt().Time.Before(workflowJobs[j].GetStartedAt().Time)
+	})
 	log.Trace().
 		Int("job_count", len(workflowJobs)).
 		Str("duration", time.Since(startTime).String()).
@@ -215,6 +208,7 @@ func jobsData(client *github.Client, owner, repo string, workflowRunID int64) ([
 	return workflowJobs, nil
 }
 
+// billingData fetches the billing data for a workflow run from GitHub
 func billingData(client *github.Client, owner, repo string, workflowRunID int64) (*github.WorkflowRunUsage, error) {
 	startTime := time.Now()
 	ctx, cancel := context.WithTimeoutCause(ghCtx, timeoutDur, errGitHubTimeout)
