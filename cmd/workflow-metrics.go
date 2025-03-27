@@ -16,16 +16,16 @@ const logTimeFormat = "2006-01-02T15:04:05.000"
 
 // These variables are set at build time and describe the Version of the application
 var (
-	version = "dev"
-	commit  = "dev"
-	date    = time.Now().Format(time.RFC3339)
-	builtBy = "local"
+	version   = "dev"
+	commit    = "dev"
+	buildTime = time.Now().Format(logTimeFormat)
+	builtBy   = "local"
 )
 
 var (
-	logFileName      string
-	logLevelInput    string
-	enableConsoleLog bool
+	logFileName       string
+	logLevelInput     string
+	disableConsoleLog bool
 
 	lumberLogger *lumberjack.Logger
 )
@@ -34,7 +34,7 @@ var rootCmd = &cobra.Command{
 	Use:   "workflow-metrics",
 	Short: "",
 	Long:  ``,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		err := os.WriteFile(logFileName, []byte{}, 0644)
 		if err != nil {
 			return err
@@ -48,8 +48,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		writers := []io.Writer{lumberLogger}
-		if enableConsoleLog {
-			writers = append(writers, os.Stdout)
+		if !disableConsoleLog {
+			writers = append(writers, zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: logTimeFormat})
 		}
 
 		logLevel, err := zerolog.ParseLevel(logLevelInput)
@@ -60,14 +60,23 @@ var rootCmd = &cobra.Command{
 		zerolog.TimeFieldFormat = logTimeFormat
 		multiWriter := zerolog.MultiLevelWriter(writers...)
 		log.Logger = zerolog.New(multiWriter).Level(logLevel).With().Timestamp().Logger()
+		log.Debug().
+			Str("version", version).
+			Str("commit", commit).
+			Str("build_time", buildTime).
+			Str("built_by", builtBy).
+			Msg("Version Info")
 		return nil
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
 	},
 }
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&logFileName, "log-file", "f", "workflow-metrics.log", "Log file name")
 	rootCmd.PersistentFlags().StringVarP(&logLevelInput, "log-level", "l", "info", "Log level")
-	rootCmd.PersistentFlags().BoolVarP(&enableConsoleLog, "enable-console-log", "c", false, "Enable console logs")
+	rootCmd.PersistentFlags().BoolVarP(&disableConsoleLog, "silent", "s", false, "Disables console logs. Still logs to file")
 }
 
 func Execute() {

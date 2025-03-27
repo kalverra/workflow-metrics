@@ -62,7 +62,7 @@ func monitor() error {
 		return err
 	}
 	for _, p := range processes {
-		name, err := p.Exe() // Name() has a bug on Mac: https://github.com/shirou/gopsutil/issues/1803
+		name, err := p.Exe() // Name has a bug on Mac: https://github.com/shirou/gopsutil/issues/1803
 		if err != nil {
 			return fmt.Errorf("error getting process name: %w", err)
 		}

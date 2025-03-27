@@ -30,4 +30,6 @@ go.work.sum
 
 metrics.json
 metrics.log
+workflow-metrics.log
+workflow-metrics.json
 data/

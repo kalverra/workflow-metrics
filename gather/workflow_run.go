@@ -10,13 +10,14 @@ import (
 
 	"github.com/google/go-github/v70/github"
 	"github.com/kalverra/workflow-metrics/monitor"
+	"github.com/rs/zerolog/log"
 )
 
 const (
 	timeoutDur = 10 * time.Second
 
 	dataDir         = "data"
-	workflowRunsDir = dataDir + string(filepath.Separator) + "workflow_runs"
+	workflowRunsDir = "workflow_runs"
 )
 
 type WorkflowRunData struct {
@@ -32,11 +33,12 @@ type WorkflowRunData struct {
 func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64, forceUpdate bool) (*WorkflowRunData, error) {
 	var (
 		workflowRunData = &WorkflowRunData{}
-		targetFile      = filepath.Join(workflowRunsDir, owner, repo, fmt.Sprintf("%d.json", workflowRunID))
+		targetDir       = filepath.Join(dataDir, owner, repo, workflowRunsDir)
+		targetFile      = filepath.Join(targetDir, fmt.Sprintf("%d.json", workflowRunID))
 		fileExists      = false
 	)
 
-	err := os.MkdirAll(workflowRunsDir, 0755)
+	err := os.MkdirAll(targetDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make data dir '%s': %w", workflowRunsDir, err)
 	}
@@ -45,7 +47,17 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 		fileExists = true
 	}
 
+	startTime := time.Now()
+	log.Info().Int64("workflow_run_id", workflowRunID).Msg("Gathering workflow run data")
+	defer func() {
+		log.Info().
+			Str("duration", time.Since(startTime).String()).
+			Int64("workflow_run_id", workflowRunID).
+			Msg("Gathered workflow run data")
+	}()
+
 	if !forceUpdate && fileExists {
+		log.Debug().Str("file", targetFile).Int64("workflow_run_id", workflowRunID).Msg("Reading workflow run data from file")
 		workflowFileBytes, err := os.ReadFile(targetFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open workflow run file: %w", err)
@@ -53,6 +65,8 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 		err = json.Unmarshal(workflowFileBytes, &workflowRunData)
 		return workflowRunData, err
 	}
+
+	log.Debug().Int64("workflow_run_id", workflowRunID).Msg("Fetching workflow run data from GitHub")
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutDur)
 	workflowRun, _, err := client.Actions.GetWorkflowRunByID(ctx, owner, repo, workflowRunID)
@@ -96,6 +110,8 @@ func WorkflowRun(client *github.Client, owner, repo string, workflowRunID int64,
 		listOpts.Page = resp.NextPage
 	}
 	workflowRunData.Jobs = workflowJobs
+
+	// TODO: Include runner and costs data
 
 	data, err := json.Marshal(workflowRunData)
 	if err != nil {
